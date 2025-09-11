@@ -1,0 +1,36 @@
+version: '3.8'
+
+services:
+  backend:
+    build: ./server
+    ports:
+      - "8000:8000"
+    environment:
+      - PORT=8000
+      - HOST=0.0.0.0
+      - FRONTEND_URL=http://localhost:3000
+      - CLIP_MODEL_NAME=openai/clip-vit-base-patch32
+      - MAX_SIMILARITY_RESULTS=20
+    volumes:
+      - ./server/uploads:/app/uploads
+      - ./server/data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  frontend:
+    build: ./client
+    ports:
+      - "3000:80"
+    environment:
+      - VITE_API_URL=http://localhost:8000
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  uploads:
+  data:

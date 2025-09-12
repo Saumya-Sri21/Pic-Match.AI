@@ -2,7 +2,7 @@ import os
 import numpy as np
 import faiss
 from PIL import Image
-from sentence_transformers import SentenceTransformer
+from transformers import CLIPProcessor, CLIPModel
 import torch
 from typing import List, Optional
 from pathlib import Path
@@ -12,30 +12,37 @@ from services.product_service import ProductService
 
 class SimilarityService:
     def __init__(self):
-        self.model_name = os.getenv("CLIP_MODEL_NAME", "clip-ViT-B-32")
+        self.model_name = os.getenv("CLIP_MODEL_NAME", "openai/clip-vit-base-patch32")
         self.model = None
+        self.processor = None
         self.index = None
         self.product_service = None
         self.embedding_dim = 512  # CLIP embedding dimension
         
     async def initialize(self):
         """Initialize the CLIP model and FAISS index"""
-        print("🔄 Loading CLIP model...")
+        print(f"🔄 Loading CLIP model: {self.model_name}")
         
         try:
             # Initialize product service first
             self.product_service = ProductService()
             await self.product_service.initialize()
+            print("✅ Product service initialized")
             
-            # Load CLIP model
-            self.model = SentenceTransformer(self.model_name)
+            # Load CLIP model and processor
+            print(f"📥 Downloading CLIP model: {self.model_name}")
+            self.model = CLIPModel.from_pretrained(self.model_name)
+            self.processor = CLIPProcessor.from_pretrained(self.model_name)
+            print("✅ CLIP model and processor loaded")
             
             # Create or load FAISS index
             await self._initialize_faiss_index()
             
-            print("✅ CLIP model and FAISS index initialized")
+            print("✅ CLIP model and FAISS index initialized successfully")
         except Exception as e:
             print(f"❌ Error initializing similarity service: {e}")
+            print(f"📝 Model name used: {self.model_name}")
+            print("⚠️  Falling back to mock results for development")
             # Ensure product service is still available for mock results
             if not self.product_service:
                 self.product_service = ProductService()
@@ -110,10 +117,14 @@ class SimilarityService:
             if image.mode != 'RGB':
                 image = image.convert('RGB')
             
-            # Encode image
-            embedding = self.model.encode([image], convert_to_tensor=False)[0]
+            # Process image and get embedding
+            inputs = self.processor(images=image, return_tensors="pt")
+            with torch.no_grad():
+                image_features = self.model.get_image_features(**inputs)
+                # Normalize the features
+                image_features = image_features / image_features.norm(dim=-1, keepdim=True)
             
-            return np.array(embedding, dtype=np.float32)
+            return image_features.cpu().numpy()[0].astype(np.float32)
             
         except Exception as e:
             print(f"Error computing embedding for {image_path_or_url}: {e}")
@@ -130,8 +141,9 @@ class SimilarityService:
         """Find visually similar products"""
         try:
             # If model is not initialized, return mock results
-            if not self.model or not self.index:
-                print("⚠️ CLIP model not initialized, returning mock results")
+            if not self.model or not self.processor or not self.index:
+                print("🚨 WARNING: CLIP model not initialized, returning MOCK RESULTS with random scores!")
+                print("🔧 This causes poor search efficiency. Check model initialization errors above.")
                 return await self._get_mock_results(max_results, category_filter)
             
             # Compute embedding for query image

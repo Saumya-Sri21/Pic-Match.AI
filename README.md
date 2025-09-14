@@ -2,6 +2,11 @@
 
 A full-stack web application that uses AI-powered visual similarity matching to find products similar to uploaded images. Built with React, FastAPI, and CLIP (Contrastive Language-Image Pre-training) technology.
 
+# Links
+Frontend deployed Link : [Link](https://pic-match-ai.onrender.com/)
+
+Backend deployed Link : [Link](https://pic-match-ai-backend.onrender.com)
+
 ## 🚀 Features
 
 - **Image Upload & URL Input**: Support for both file uploads and image URL processing
@@ -16,7 +21,7 @@ A full-stack web application that uses AI-powered visual similarity matching to 
 ## 🛠️ Tech Stack
 
 ### Frontend
-- **React 18** with Vite for fast development
+- **React** with Vite for fast development
 - **Tailwind CSS** for responsive styling
 - **React Query** for efficient data fetching
 - **React Dropzone** for drag-and-drop uploads
@@ -25,7 +30,7 @@ A full-stack web application that uses AI-powered visual similarity matching to 
 
 ### Backend
 - **FastAPI** for high-performance API
-- **Python 3.11** with async/await support
+- **Python** with async/await support
 - **CLIP Model** via Sentence Transformers
 - **FAISS** for vector similarity search
 - **Pillow** for image processing
@@ -75,6 +80,7 @@ cd client
 
 # Install dependencies
 npm install
+Or yarn install
 
 # Copy environment file
 cp .env.example .env
@@ -86,49 +92,17 @@ npm run dev
 4. **Access the application**
 - Frontend: http://localhost:5173
 - Backend API: http://localhost:8000
-- API Documentation: http://localhost:8000/docs
-
-### Docker Setup
-
-1. **Using Docker Compose (Recommended)**
-```bash
-# Build and start all services
-docker-compose up --build
-
-# Access the application
-# Frontend: http://localhost:3000
-# Backend: http://localhost:8000
-```
-
-2. **Individual Docker Builds**
-```bash
-# Backend
-cd server
-docker build -t visual-matcher-backend .
-docker run -p 8000:8000 visual-matcher-backend
-
-# Frontend
-cd client
-docker build -t visual-matcher-frontend .
-docker run -p 3000:80 visual-matcher-frontend
-```
 
 ## 🌐 Deployment
 
-### Frontend Deployment (Vercel/Netlify)
+### Frontend Deployment (Render)
+#### Render
+1. Connect your GitHub repository
+2. Select the `client` directory as root
+3. Set build command: `npm install && npm run build`
+4. Configure environment variables
 
-#### Vercel
-1. Install Vercel CLI: `npm i -g vercel`
-2. Navigate to client directory: `cd client`
-3. Deploy: `vercel --prod`
-4. Update `VITE_API_URL` in environment variables
-
-#### Netlify
-1. Build the project: `npm run build`
-2. Deploy the `dist` folder to Netlify
-3. Configure environment variables in Netlify dashboard
-
-### Backend Deployment (Render/Railway)
+### Backend Deployment (Render)
 
 #### Render
 1. Connect your GitHub repository
@@ -137,12 +111,6 @@ docker run -p 3000:80 visual-matcher-frontend
 4. Set start command: `uvicorn main:app --host 0.0.0.0 --port $PORT`
 5. Configure environment variables
 
-#### Railway
-1. Install Railway CLI: `npm i -g @railway/cli`
-2. Navigate to server directory: `cd server`
-3. Deploy: `railway login && railway up`
-4. Configure environment variables in Railway dashboard
-
 ### Environment Variables
 
 #### Backend (.env)
@@ -150,7 +118,7 @@ docker run -p 3000:80 visual-matcher-frontend
 PORT=8000
 HOST=0.0.0.0
 FRONTEND_URL=https://your-frontend-domain.com
-CLIP_MODEL_NAME=openai/clip-vit-base-patch32
+SENTENCE_MODEL_NAME=sentence-transformers/paraphrase-MiniLM-L6-v2
 MAX_SIMILARITY_RESULTS=20
 ```
 
@@ -275,10 +243,6 @@ rm -rf ~/.cache/huggingface/
 4. Push to branch: `git push origin feature/amazing-feature`
 5. Open a Pull Request
 
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
 ## 🙏 Acknowledgments
 
 - [OpenAI CLIP](https://github.com/openai/CLIP) for the vision-language model
@@ -287,10 +251,4 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - [React](https://reactjs.org/) and [Vite](https://vitejs.dev/) for the frontend stack
 - [Tailwind CSS](https://tailwindcss.com/) for beautiful styling
 
-## 📞 Support
 
-For support, email support@visualmatcher.com or create an issue in the GitHub repository.
-
----
-
-**Built with ❤️ using React, FastAPI, and AI technology**

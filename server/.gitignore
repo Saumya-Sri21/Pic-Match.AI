@@ -28,12 +28,13 @@ ENV/
 
 # Environment Variables
 .env
+{{ ... }}
 .env.local
 .env.production
 
 # Uploads and Data
 uploads/
-data/
+# data/ - commented out to allow products.json editing
 *.bin
 *.index
 

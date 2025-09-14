@@ -2,7 +2,6 @@ import os
 import numpy as np
 import faiss
 from PIL import Image
-from transformers import CLIPProcessor, CLIPModel
 import torch
 from typing import List, Optional
 from pathlib import Path
@@ -12,23 +11,24 @@ from services.product_service import ProductService
 
 class SimilarityService:
     def __init__(self):
-        # Use smaller model for deployment environments with memory constraints
-        default_model = "openai/clip-vit-base-patch32"
-        if os.getenv("RENDER") or os.getenv("RAILWAY_ENVIRONMENT") or os.getenv("VERCEL"):
-            # Use smaller model for cloud deployments
-            default_model = "sentence-transformers/clip-ViT-B-32-multilingual-v1"
+        # Use lightweight sentence transformer for memory-constrained deployments
+        default_model = "sentence-transformers/paraphrase-MiniLM-L6-v2"
         
-        self.model_name = os.getenv("CLIP_MODEL_NAME", default_model)
+        # Force lightweight mode for cloud deployments to stay under 512MB
+        if os.getenv("RENDER") or os.getenv("RAILWAY_ENVIRONMENT") or os.getenv("VERCEL"):
+            default_model = "sentence-transformers/paraphrase-MiniLM-L6-v2"
+            os.environ["LIGHTWEIGHT_MODE"] = "true"
+        
+        self.model_name = os.getenv("SENTENCE_MODEL_NAME", default_model)
         self.model = None
-        self.processor = None
         self.index = None
         self.product_service = None
-        self.embedding_dim = 512  # CLIP embedding dimension
-        self.use_lightweight_mode = os.getenv("LIGHTWEIGHT_MODE", "false").lower() == "true"
+        self.embedding_dim = 384  # MiniLM embedding dimension
+        self.use_lightweight_mode = os.getenv("LIGHTWEIGHT_MODE", "true").lower() == "true"  # Default to true
         
     async def initialize(self):
-        """Initialize the CLIP model and FAISS index"""
-        print(f"🔄 Loading CLIP model: {self.model_name}")
+        """Initialize the lightweight sentence transformer model"""
+        print(f"🔄 Loading lightweight model: {self.model_name}")
         print(f"💾 Lightweight mode: {self.use_lightweight_mode}")
         
         try:
@@ -37,49 +37,43 @@ class SimilarityService:
             await self.product_service.initialize()
             print("✅ Product service initialized")
             
-            # Skip CLIP model in lightweight mode (for memory-constrained deployments)
+            # Always use lightweight text-based approach for memory efficiency
             if self.use_lightweight_mode:
-                print("⚡ Lightweight mode enabled - skipping CLIP model loading")
-                print("📊 Using text-based similarity matching instead")
-                self.model = None
-                self.processor = None
-                self.index = None
+                print("⚡ Lightweight mode enabled - using optimized text-based similarity")
+                print("📊 Memory footprint: ~50MB (vs 600MB+ for CLIP models)")
+                
+                # Load lightweight sentence transformer for text embeddings only
+                from sentence_transformers import SentenceTransformer
+                torch.set_num_threads(1)  # Reduce CPU usage
+                
+                self.model = SentenceTransformer(
+                    self.model_name,
+                    device='cpu'  # Force CPU to avoid GPU memory issues
+                )
+                print(f"✅ Lightweight model loaded: {self.model_name}")
+                
+                # Create or load FAISS index for text embeddings
+                await self._initialize_faiss_index()
                 return
             
-            # Load CLIP model and processor with memory optimization
-            print(f"📥 Downloading CLIP model: {self.model_name}")
+            # Fallback to text-only mode if not in lightweight mode
+            print("📊 Using basic text-based similarity matching")
+            self.model = None
+            self.index = None
             
-            # Try to load with low memory usage
-            import torch
-            torch.set_num_threads(1)  # Reduce CPU usage
-            
-            self.model = CLIPModel.from_pretrained(
-                self.model_name,
-                torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
-                low_cpu_mem_usage=True
-            )
-            self.processor = CLIPProcessor.from_pretrained(self.model_name)
-            print("✅ CLIP model and processor loaded")
-            
-            # Create or load FAISS index
-            await self._initialize_faiss_index()
-            
-            print("✅ CLIP model and FAISS index initialized successfully")
         except Exception as e:
             print(f"❌ Error initializing similarity service: {e}")
             print(f"📝 Model name used: {self.model_name}")
-            print("⚠️  Falling back to text-based similarity matching")
+            print("⚠️  Falling back to basic text-based similarity matching")
             # Ensure product service is still available for fallback results
             if not self.product_service:
                 self.product_service = ProductService()
                 await self.product_service.initialize()
-            # Create a dummy model for development
             self.model = None
-            self.processor = None
             self.index = None
     
     async def _initialize_faiss_index(self):
-        """Initialize FAISS index with product embeddings"""
+        """Initialize FAISS index with text-based product embeddings"""
         index_path = Path("data/faiss_index.bin")
         
         if index_path.exists():
@@ -90,25 +84,24 @@ class SimilarityService:
             # Create new index
             self.index = faiss.IndexFlatIP(self.embedding_dim)  # Inner product for cosine similarity
             
-            # Get all products and compute embeddings
+            # Get all products and compute text embeddings
             products = await self.product_service.get_all_products()
             
-            if products:
-                print(f"🔄 Computing embeddings for {len(products)} products...")
+            if products and self.model:
+                print(f"🔄 Computing text embeddings for {len(products)} products...")
                 embeddings = []
                 
                 for product in products:
-                    if product.embedding:
-                        # Use pre-computed embedding
-                        embeddings.append(product.embedding)
-                    else:
-                        # Compute embedding from image
-                        embedding = await self._compute_image_embedding(product.image_url)
-                        embeddings.append(embedding)
-                        
-                        # Update product with embedding
-                        product.embedding = embedding.tolist()
-                        await self.product_service.update_product(product)
+                    # Create text representation of product
+                    product_text = f"{product.name} {product.description} {' '.join(product.tags)} {product.category}"
+                    
+                    # Compute text embedding using sentence transformer
+                    embedding = self.model.encode(product_text, convert_to_numpy=True)
+                    embeddings.append(embedding)
+                    
+                    # Update product with embedding
+                    product.embedding = embedding.tolist()
+                    await self.product_service.update_product(product)
                 
                 if embeddings:
                     # Normalize embeddings for cosine similarity
@@ -124,37 +117,27 @@ class SimilarityService:
                     
                     print("✅ FAISS index created and saved")
     
-    async def _compute_image_embedding(self, image_path_or_url: str) -> np.ndarray:
-        """Compute CLIP embedding for an image"""
+    async def _compute_text_embedding_from_image(self, image_path_or_url: str) -> np.ndarray:
+        """Extract text features from image filename and compute embedding"""
         try:
-            if image_path_or_url.startswith(('http://', 'https://')):
-                # Handle URL
-                import httpx
-                async with httpx.AsyncClient() as client:
-                    response = await client.get(image_path_or_url)
-                    response.raise_for_status()
-                    
-                    import io
-                    image = Image.open(io.BytesIO(response.content))
+            # Extract meaningful text from image path/URL
+            import os
+            filename = os.path.basename(image_path_or_url).lower()
+            
+            # Remove file extensions and clean up
+            text = filename.replace('.jpg', '').replace('.png', '').replace('.jpeg', '').replace('.webp', '')
+            text = text.replace('_', ' ').replace('-', ' ').replace('.', ' ')
+            
+            # If we have a sentence transformer model, use it
+            if self.model and hasattr(self.model, 'encode'):
+                embedding = self.model.encode(text, convert_to_numpy=True)
+                return embedding.astype(np.float32)
             else:
-                # Handle local file path
-                image = Image.open(image_path_or_url)
-            
-            # Convert to RGB if necessary
-            if image.mode != 'RGB':
-                image = image.convert('RGB')
-            
-            # Process image and get embedding
-            inputs = self.processor(images=image, return_tensors="pt")
-            with torch.no_grad():
-                image_features = self.model.get_image_features(**inputs)
-                # Normalize the features
-                image_features = image_features / image_features.norm(dim=-1, keepdim=True)
-            
-            return image_features.cpu().numpy()[0].astype(np.float32)
+                # Fallback to zero embedding
+                return np.zeros(self.embedding_dim, dtype=np.float32)
             
         except Exception as e:
-            print(f"Error computing embedding for {image_path_or_url}: {e}")
+            print(f"Error computing text embedding for {image_path_or_url}: {e}")
             # Return zero embedding as fallback
             return np.zeros(self.embedding_dim, dtype=np.float32)
     
@@ -165,62 +148,60 @@ class SimilarityService:
         max_results: int = 20,
         category_filter: Optional[str] = None
     ) -> List[SimilarityResult]:
-        """Find visually similar products"""
+        """Find similar products using lightweight text-based embeddings"""
         try:
-            # If model is not initialized, use text-based similarity
-            if not self.model or not self.processor or not self.index:
-                if self.use_lightweight_mode:
-                    print("📊 Using text-based similarity matching (lightweight mode)")
-                    return await self._get_text_based_results(query_image_path, max_results, category_filter)
-                else:
-                    print("🚨 WARNING: CLIP model not initialized, returning MOCK RESULTS with random scores!")
-                    print("🔧 This causes poor search efficiency. Check model initialization errors above.")
-                    return await self._get_mock_results(max_results, category_filter)
-            
-            # Compute embedding for query image
-            query_embedding = await self._compute_image_embedding(query_image_path)
-            
-            # Normalize for cosine similarity
-            query_embedding = query_embedding.reshape(1, -1).astype(np.float32)
-            faiss.normalize_L2(query_embedding)
-            
-            # Search in FAISS index
-            k = min(max_results * 2, self.index.ntotal)  # Get more results to filter
-            similarities, indices = self.index.search(query_embedding, k)
-            
-            # Get products
-            products = await self.product_service.get_all_products()
-            
-            results = []
-            for i, (similarity, idx) in enumerate(zip(similarities[0], indices[0])):
-                if idx == -1:  # Invalid index
-                    continue
+            # Use lightweight text-based similarity with sentence transformers
+            if self.use_lightweight_mode and self.model and self.index:
+                print("📊 Using lightweight sentence transformer similarity matching")
+                
+                # Extract text from query image filename and compute embedding
+                query_embedding = await self._compute_text_embedding_from_image(query_image_path)
+                
+                # Normalize for cosine similarity
+                query_embedding = query_embedding.reshape(1, -1).astype(np.float32)
+                faiss.normalize_L2(query_embedding)
+                
+                # Search in FAISS index
+                k = min(max_results * 2, self.index.ntotal)  # Get more results to filter
+                similarities, indices = self.index.search(query_embedding, k)
+                
+                # Get products
+                products = await self.product_service.get_all_products()
+                
+                results = []
+                for i, (similarity, idx) in enumerate(zip(similarities[0], indices[0])):
+                    if idx == -1:  # Invalid index
+                        continue
+                        
+                    if similarity < min_similarity:
+                        continue
                     
-                if similarity < min_similarity:
-                    continue
-                
-                if idx >= len(products):
-                    continue
+                    if idx >= len(products):
+                        continue
+                        
+                    product = products[idx]
                     
-                product = products[idx]
+                    # Apply category filter
+                    if category_filter and product.category.lower() != category_filter.lower():
+                        continue
+                    
+                    results.append(SimilarityResult(
+                        product=product,
+                        similarity_score=float(similarity)
+                    ))
+                    
+                    if len(results) >= max_results:
+                        break
                 
-                # Apply category filter
-                if category_filter and product.category.lower() != category_filter.lower():
-                    continue
-                
-                results.append(SimilarityResult(
-                    product=product,
-                    similarity_score=float(similarity)
-                ))
-                
-                if len(results) >= max_results:
-                    break
-            
-            return results
+                return results
+            else:
+                # Fallback to basic text matching
+                print("📊 Using basic text-based similarity matching")
+                return await self._get_text_based_results(query_image_path, max_results, category_filter)
             
         except Exception as e:
             print(f"Error finding similar products: {e}")
-            return await self._get_mock_results(max_results, category_filter)
+            return await self._get_text_based_results(query_image_path, max_results, category_filter)
     
     async def _get_mock_results(self, max_results: int = 20, category_filter: Optional[str] = None) -> List[SimilarityResult]:
         """Return mock similarity results for development"""
@@ -303,11 +284,13 @@ class SimilarityService:
             return await self._get_mock_results(max_results, category_filter)
     
     async def add_product_to_index(self, product: Product):
-        """Add a new product to the FAISS index"""
+        """Add a new product to the FAISS index using text embeddings"""
         try:
-            # Compute embedding if not present
-            if not product.embedding:
-                embedding = await self._compute_image_embedding(product.image_url)
+            # Compute text embedding if not present
+            if not product.embedding and self.model:
+                # Create text representation of product
+                product_text = f"{product.name} {product.description} {' '.join(product.tags)} {product.category}"
+                embedding = self.model.encode(product_text, convert_to_numpy=True)
                 product.embedding = embedding.tolist()
             else:
                 embedding = np.array(product.embedding, dtype=np.float32)

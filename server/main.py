@@ -14,6 +14,7 @@ from services.image_service import ImageService
 from services.similarity_service import SimilarityService
 from services.product_service import ProductService
 
+
 # Load environment variables
 load_dotenv()
 
@@ -47,13 +48,30 @@ app = FastAPI(
 )
 
 # CORS middleware
+# app.add_middleware(
+#     CORSMiddleware,
+#     allow_origins=[os.getenv("FRONTEND_URL", "http://localhost:5173")],
+#     allow_credentials=True,
+#     allow_methods=["*"],
+#     allow_headers=["*"],
+# )
+
+
+
+# Allowed origins
+allowed_origins = [
+    os.getenv("FRONTEND_URL", "http://localhost:5173"),
+    "https://pic-match-ai.onrender.com"  # Deployed frontend URL
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[os.getenv("FRONTEND_URL", "http://localhost:5173")],
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 # Mount static files for serving uploaded images
 os.makedirs("uploads", exist_ok=True)
